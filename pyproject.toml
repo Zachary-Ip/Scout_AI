@@ -1,0 +1,33 @@
+[project]
+name = "ai-assistant"
+version = "0.1.0"
+description = "A barebones implementation of a RAG-AI assistant"
+authors = [
+    {name = "Zach Ip",email = "ip.zachary.t@gmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11, <4.0"
+dependencies = [
+    "openai (>=1.72.0,<2.0.0)",
+    "langchain (>=0.3.23,<0.4.0)",
+    "pinecone (>=6.0.2,<7.0.0)",
+    "pandas (>=2.2.3,<3.0.0)",
+    "mcp (>=1.6.0,<2.0.0)",
+    "google-cloud-bigquery (>=3.31.0,<4.0.0)",
+    "dotenv (>=0.9.9,<0.10.0)",
+    "black (>=25.1.0,<26.0.0)",
+    "isort (>=6.0.1,<7.0.0)",
+    "chromadb (>=1.0.3,<2.0.0)",
+    "torch (>=2.6.0,<3.0.0)",
+    "sentence-transformers (>=4.0.2,<5.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry]
+packages = [{ include = "ai_assistant" }]
