@@ -1,12 +1,13 @@
-import chromadb
-import pandas as pd
-from sentence_transformers import SentenceTransformer
-
-from dotenv import load_dotenv
 import os
 
+import chromadb
+import pandas as pd
+from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+
+load_dotenv()
 print("Starting vector process")
-db_path = os.getenv("OPENAI_KEY")
+db_path = os.getenv("DB_PATH")
 print(db_path)
 os.makedirs(db_path, exist_ok=True)
 
@@ -15,11 +16,11 @@ client = chromadb.PersistentClient(path=db_path)
 
 print("Client created")
 # Check if collection exists and create or get it
-collection_name = "my_documents"
+collection_name = os.getenv("COLLECTION_NAME")
 try:
     collection = client.get_collection(collection_name)
     print(f"Loaded existing collection with {collection.count()} documents")
-except ValueError:
+except chromadb.errors.NotFoundError:
     # Collection doesn't exist yet, create it
     collection = client.create_collection(collection_name)
     print("Created new collection")
@@ -27,16 +28,18 @@ except ValueError:
 
 # For embedding generation without OpenAI (while you wait for credits)
 model = SentenceTransformer("all-MiniLM-L6-v2")  # A good free alternative
-
+print("Sentence transformer initialized")
 # Load your dataset
 df = pd.read_csv("data/laptops_dataset_final_600.csv")
-
+print("Data loaded")
 # Process documents and generate embeddings
 documents = []
 embeddings = []
 metadata = []
 ids = []
 
+
+print("Starting embedding")
 # Assuming your CSV has a 'text' column and perhaps other metadata columns
 for idx, row in df.iterrows():
     # Limit to the first 1000 for testing
@@ -73,6 +76,7 @@ for idx, row in df.iterrows():
         )
         documents, embeddings, metadata, ids = [], [], [], []
 
+print("Finished embedding")
 # Add any remaining documents
 if documents:
     collection.add(
@@ -126,13 +130,3 @@ def update_vector_db(new_documents, collection):
         )
 
     return len(new_documents) - len(existing_ids)  # Return number of new docs added
-
-
-def query_vector_db(query_text, n_results=3):
-    # Generate embedding for the query
-    query_embedding = model.encode(query_text)
-
-    # Search the collection
-    results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
-
-    return results
