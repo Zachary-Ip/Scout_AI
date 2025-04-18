@@ -5,7 +5,7 @@ from dotenv import find_dotenv, load_dotenv
 from flask import Flask, jsonify, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
-from slack_functions import RAG_response
+from slack_functions import DEMOGRAPHIC_SCHEMA, SURVEY_SCHEMA, RAG_response
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
@@ -38,11 +38,9 @@ logger = logging.getLogger(__name__)
 #     that would easily be parsed as a SQL query, emphasize that resulting data needs to fit in limited context
 #     window, so it should utilize as many group, average, and summary functions as possible.
 #      ELSE RETURN and ask for clarification, reiterating capabilities
-#     try to add an exception if the ask seems too advanced for a simple SQL query, prompt a resonse to create a ticket with
+# 4. try to add an exception if the ask seems too advanced for a simple SQL query, prompt a resonse to create a ticket with
 #     the data science department
-#     Figure out how to automatically report tickets to a new channel
-# 4. Find or generate adsense data
-# 5. Either with adsense data or other data you are continuing with, do more EDA and help the prompt with descriptions of the data
+# 5. Figure out how to automatically report tickets to a new channel
 # 6. Figure out how to add memory
 
 # Out of VS code
@@ -69,21 +67,6 @@ def get_bot_user_id():
         print(f"Error: {e}")
 
 
-def my_function(text):
-    """
-    Custom function to process the text and return a response.
-    In this example, the function converts the input text to uppercase.
-
-    Args:
-        text (str): The input text to process.
-
-    Returns:
-        str: The processed text.
-    """
-    response = text.upper()
-    return response
-
-
 @app.event("app_mention")
 def handle_mentions(body, say):
     """
@@ -95,29 +78,38 @@ def handle_mentions(body, say):
         say (callable): A function for sending a response to the channel.
     """
     logger.debug("MENTION DETECTED")
-    say("Let me think about that...")
     text = body["event"]["text"]
 
     mention = f"<@{SLACK_BOT_USER_ID}>"
     text = text.replace(mention, "").strip()
 
     # Do some basic keyword detection
-    if "intro" in text.lower():
+    if "intro" in text.lower() or "hello" in text.lower():
         say(
             """
-            Hello! I am a virtual assistant designed to help you answer questions regarding a dataset containing _____ data. 
-            Try asking me a question like, "
+            Hello! I am a virtual assistant designed to help you answer questions regarding a dataset containing student data. 
+            Try asking me a question like, "Do students who study longer or earlier for exams perform better?"
             """
         )
     elif "dataset" in text.lower() or "access" in text.lower():
         say(
-            """
+            f"""
             Here is more information about the dataset I have access to:
+
+            # Student Survey Data
+
+            {SURVEY_SCHEMA}
+
+            # Student Demographic Data
+
+            {DEMOGRAPHIC_SCHEMA}
         """
         )
     else:
+
+        say("Let me think about that...")
         response = RAG_response(text, say)
-        say(response)
+        say(response.text())
 
 
 @flask_app.route("/slack/events", methods=["POST"])

@@ -1,13 +1,13 @@
 import os
+import sqlite3
 
+import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 from google.cloud import bigquery
-from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
-from langchain_community.chat_models import ChatOpenAI
+from langchain_core.runnables.base import RunnableSequence
+from langchain_openai import ChatOpenAI
 from tabulate import tabulate
-import sqlite3
-import pandas as pd
 
 load_dotenv(find_dotenv())
 OPENAI_API_KEY = os.getenv("OPENAI_KEY")
@@ -22,7 +22,9 @@ Columns:
 """
 
 SURVEY_SCHEMA = """
-Table: student_survey
+
+# TABLE TO QUERY FROM: student_survey
+
 This table contains survey results where each column corresponds to a student self-assessment question.
 All responses are numeric, ranging from 0 to 4:
     0 = Never / Very Poor
@@ -55,7 +57,7 @@ Q18: Do you adjust your reading style for different subjects?
 """
 
 DEMOGRAPHIC_SCHEMA = """
-Table: student_demographic
+# TABLE TO QUERY FROM: student_demographic
 This database contains demographic and lifestyle data for students, including academic performance over three years. The table contains one row per student.
 
 Column Name: Description (Data Type)
@@ -98,13 +100,13 @@ Column Name: Description (Data Type)
 """
 
 
-def RAG_response(user_input, say):
+def RAG_response(user_query, say):
     # Initialize chat model
     chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=1)
 
     # Prompt templates
     senior_prompt_template = PromptTemplate(
-        input_variables=["user_input"],
+        input_variables=["user_query"],
         template="""
         # Role
         You are a senior data scientist helping to translate user questions for a junior data scientist to create an SQL query for.
@@ -136,7 +138,7 @@ def RAG_response(user_input, say):
     )
 
     sql_prompt_template = PromptTemplate(
-        input_variables=["user_input", "schema_info"],
+        input_variables=["user_query", "schema_info"],
         template="""
         # Role
         You are a senior data scientist providing insight to a question by creating an SQL query for a database.
@@ -154,7 +156,7 @@ def RAG_response(user_input, say):
         {schema_info}
         
         # User Query
-        "{user_input}"
+        "{user_query}"
 
         # Result limit
         Always limit results to not overwhelm the context window at
@@ -182,46 +184,52 @@ def RAG_response(user_input, say):
 
     # Initialize chains
 
-    senior_chain = LLMChain(llm=chat, prompt=senior_prompt_template)
-    sql_generation_chain = LLMChain(llm=chat, prompt=sql_prompt_template)
-    final_response_chain = LLMChain(llm=chat, prompt=final_prompt_template)
+    senior_chain = senior_prompt_template | chat
+    sql_generation_chain = sql_prompt_template | chat
+    final_response_chain = final_prompt_template | chat
 
     # Run the SQL generation chain
-    senior_response = senior_chain.run(user_input=user_input)
-
-    if senior_response.startswith("RETURN: "):
-        return senior_response.strip("RETURN: ")
-    elif senior_response.startswith("CONTINUE: "):
-        senior_response = senior_response.strip("CONTINUE: ")
-        if senior_response.startswith("SURVEY: "):
+    senior_response = senior_chain.invoke(input={"user_query": user_query})
+    senior_text = senior_response.text()
+    if senior_text.startswith("RETURN: "):
+        return senior_text.strip("RETURN: ")
+    elif senior_text.startswith("CONTINUE: "):
+        senior_text = senior_text.strip("CONTINUE: ")
+        if senior_text.startswith("SURVEY: "):
             # Run the SQL generation chain
-            sql_response = sql_generation_chain.run(
-                user_input=user_input, schema_info=SURVEY_SCHEMA
+            sql_response = sql_generation_chain.invoke(
+                input={
+                    "user_query": senior_text.strip("SURVEY: "),
+                    "schema_info": SURVEY_SCHEMA,
+                }
             )
-        elif senior_response.startswith("DEMOGRAPHIC: "):
-            sql_response = sql_generation_chain.run(
-                user_input=user_input, schema_info=DEMOGRAPHIC_SCHEMA
+        elif senior_text.startswith("DEMOGRAPHIC: "):
+            sql_response = sql_generation_chain.invoke(
+                input={
+                    "user_query": senior_text.strip("DEMOGRAPHIC: "),
+                    "schema_info": DEMOGRAPHIC_SCHEMA,
+                }
             )
-
+        say(f"Let's try phrasing your question like this: {senior_response.text()}")
         # Extract the SQL query
-        SQL_query = extract_sql_from_response(sql_response)
+        SQL_query = extract_sql_from_response(sql_response.text())
         say("Querying the database with:")
         say(SQL_query)
 
         # Execute the SQL query
         conn = sqlite3.connect("student.db")
-        df = pd.read_sql_query("SELECT * FROM survey_responses LIMIT 5", conn)
+        df = pd.read_sql_query(SQL_query, conn)
         text_table = df.to_markdown(index=False)
         say("Here's what I found:")
         say(f"```{text_table}```")
 
     else:
-        return f"ERROR, template not strict enough. Chat responded: {senior_response}"
-
-    # 2. Final Response Chain
+        return f"ERROR, template not strict enough. Chat responded: {senior_response.text()}"
 
     # Run the final response chain
-    return final_response_chain.run(user_query=user_input, sql_result=text_table)
+    return final_response_chain.invoke(
+        input={"user_query": user_query, "sql_result": text_table}
+    )
 
 
 def extract_sql_from_response(llm_response):
