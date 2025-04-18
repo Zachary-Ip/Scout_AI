@@ -109,7 +109,7 @@ def handle_mentions(body, say):
 
         say("Let me think about that...")
         response = RAG_response(text, say)
-        say(response.text())
+        say(response)
 
 
 @flask_app.route("/slack/events", methods=["POST"])

@@ -113,8 +113,18 @@ def RAG_response(user_query, say):
         
         # Available Data
         You have access to 2 data sets:
-            1. student survey data - a qualtrics survey of student study habits on a scale from 1 (never) to 5 (always), and GPA
-            2. student demographic data - a table containing demographic data (e.g. age, gender, parents education), and grades across 3 years
+            1. student survey data - a survey of student study habits on a scale from 1 (never) to 5 (always), and GPA. Questions cover topics like: 
+            - "did you sleep 6 hours"
+            - "do you ask questions in class"
+            - "Do you review notes"
+            - current GPA (no year specified)
+
+            2. student demographic data - a table containing demographic data grades across 3 years. Contains information such as
+            - Age of student
+            - environment (rural vs urban)
+            - parents education (ranks 1-5), status (together, separated)
+            - self reported free time, study time, family relationship, alcohol usage
+            - absences and grades for years 1 through 3
         
         # User Question
         "{user_query}"
@@ -122,12 +132,15 @@ def RAG_response(user_query, say):
         # Instructions
         1. Determine if the question can be answered using the available data.
         
-        2. If the question CANNOT be answered with the available data, or if it's too vague:
+        2. If the question CANNOT be answered with the available data, if the question is too vague, or if the question is too advanced for a simple SQL query:
         - Start your response with "RETURN: " followed by a brief explanation
         - Example: "RETURN: This question requires financial data not available in the schema."
+        - Example: "RETURN: I am unable to do compare the relative effictiveness of studying vs drinking in a single query.
         
         3. If the question CAN be answered with the available data:
-        - Start your response with "CONTINUE: " followed by either "SURVEY: " or "DEMOGRAPHIC: ", then finally, a clear, rephrased version of the question
+        - Start your response with "CONTINUE: " then either "SURVEY: " or "DEMOGRAPHIC: ", depending on which table is more appropriate for the question 
+
+        4. Finally, rephrase the question for the junior data scientist
         - The junior data scientist will have access to the full data schema
         - The query should be concise and include only essential columns
         - Use GROUP BY, aggregation functions (AVG, COUNT, etc.) when appropriate for summarization
@@ -196,21 +209,27 @@ def RAG_response(user_query, say):
     elif senior_text.startswith("CONTINUE: "):
         senior_text = senior_text.strip("CONTINUE: ")
         if senior_text.startswith("SURVEY: "):
+            senior_text = senior_text.strip("SURVEY: ")
+            say("That seems like a good question for the Survey table")
             # Run the SQL generation chain
             sql_response = sql_generation_chain.invoke(
                 input={
-                    "user_query": senior_text.strip("SURVEY: "),
+                    "user_query": senior_text,
                     "schema_info": SURVEY_SCHEMA,
                 }
             )
         elif senior_text.startswith("DEMOGRAPHIC: "):
+            say("That seems like a good question for the Demographic table")
+            senior_text = senior_text.strip("DEMOGRAPHIC: ")
             sql_response = sql_generation_chain.invoke(
                 input={
-                    "user_query": senior_text.strip("DEMOGRAPHIC: "),
+                    "user_query": senior_text,
                     "schema_info": DEMOGRAPHIC_SCHEMA,
                 }
             )
-        say(f"Let's try phrasing your question like this: {senior_response.text()}")
+        else:
+            say("I was not able to route you to an appropriate table.")
+        say(f"Let's try phrasing your question like this: {senior_text}")
         # Extract the SQL query
         SQL_query = extract_sql_from_response(sql_response.text())
         say("Querying the database with:")
@@ -229,7 +248,7 @@ def RAG_response(user_query, say):
     # Run the final response chain
     return final_response_chain.invoke(
         input={"user_query": user_query, "sql_result": text_table}
-    )
+    ).text()
 
 
 def extract_sql_from_response(llm_response):
