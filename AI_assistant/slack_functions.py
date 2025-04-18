@@ -3,22 +3,16 @@ import os
 from dotenv import find_dotenv, load_dotenv
 from google.cloud import bigquery
 from langchain.chains import LLMChain
-from langchain.prompts.chat import (
-    ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-    SystemMessagePromptTemplate,
-)
+from langchain_core.prompts import PromptTemplate
 from langchain_community.chat_models import ChatOpenAI
 from tabulate import tabulate
 
 load_dotenv(find_dotenv())
 OPENAI_API_KEY = os.getenv("OPENAI_KEY")
 SCHEMA_INFO = """
-Table: top_terms
+Table: bigquery-public-data.google_trends.top_terms
 Columns:
-- refresh_date (DATE): The date the data was refreshed
 - dma_name (STRING): The name of the designated market area
-- dma_id (INTEGER): The numeric ID of the DMA
 - term (STRING): The search term
 - week (DATE): The week of the trend data
 - score (INTEGER): The popularity score of the term
@@ -26,86 +20,126 @@ Columns:
 """
 
 
-def draft_email(user_input):
+def RAG_response(user_input, say):
+    # Initialize chat model
     chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=1)
 
-    template = """
-    
-    You are a helpful assistant that drafts an email reply based on an a new email.
-    
-    You goal is help the user quickly create a perfect email reply by.
-    
-    Keep your reply short and to the point and mimic the style of the email so you reply in a similar manner to match the tone.
-    
-    Make sure to sign of with {signature}.
-    
-    """
+    # 1. Routing and massaging query
+    senior_prompt_template = PromptTemplate(
+        input_variables=["user_input"],
+        template="""
+        # Role
+        You are a senior data scientist helping to translate user questions for a junior data scientist to create an SQL query for.
+        
+        # Available Data
+        You have access to 2 data sets:
+            1. student survey data - a qualtrics survey of student study habits on a scale from 1 (never) to 5 (always), and GPA
+            2. student demographic data - a table containing demographic data (e.g. age, gender, parents education), and grades in 3 classes
+        
+        # User Question
+        "{user_query}"
+        
+        # Instructions
+        1. Determine if the question can be answered using the available data.
+        
+        2. If the question CANNOT be answered with the available data, or if it's too vague:
+        - Start your response with "RETURN: " followed by a brief explanation
+        - Example: "RETURN: This question requires financial data not available in the schema."
+        
+        3. If the question CAN be answered with the available data:
+        - Start your response with "CONTINUE: " followed by either "SURVEY: " or "DEMOGRAPHIC: ", then finally, a clear, rephrased version of the question
+        - The junior data scientist will have access to the full data schema
+        - The query should be concise and include only essential columns
+        - Use GROUP BY, aggregation functions (AVG, COUNT, etc.) when appropriate for summarization
+        - Include proper WHERE clauses to filter irrelevant data
+        - Limit results to a reasonable number if returning raw records
+        - Do not use INSERT, UPDATE, or DELETE statements
+    """,
+    )
 
-    signature = "Kind regards, \n\nDave"
-    system_message_prompt = SystemMessagePromptTemplate.from_template(template)
+    senior_chain = LLMChain(llm=chat, prompt=senior_prompt_template)
 
-    human_template = "Here's the email to reply to and consider any other comments from the user for reply as well: {user_input}"
-    human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+    # Run the SQL generation chain
+    senior_response = senior_chain.run(user_input=user_input)
 
-    chain = LLMChain(llm=chat, prompt=chat_prompt)
-    response = chain.run(user_input=user_input, signature=signature)
+    if senior_response.startswith("RETURN: "):
+        senior_response.strip("RETURN: ")
+        say(senior_response)
 
-    return response
+    # 1. SQL Generation Chain
+    sql_prompt_template = PromptTemplate(
+        input_variables=["user_input", "schema_info"],
+        template="""
+        # Instructions
+         
+        Write a syntactically valid BigQuery Standard SQL query that answers the user's question using only the schema provided. 
+        Do not include any data modification statements (e.g., INSERT, UPDATE, DELETE).
+        Return only the SQL query, wrapped in ```sql``` tags — no additional text, explanation, or formatting.
 
+        The data contains individual ranks of search terms for each week, and DMA, so querys that ask for 
+        "highest ranking terms" without other specification will need to average across these terms to retrieve sensible values
 
-def RAG_response(user_input):
-    chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=1)
-    SQL_prompt = create_sql_generation_prompt(user_input, SCHEMA_INFO)
+        Also, it may be neccesary to re-rank  the outputs based on the score paremeter due to averageing across week or DMA area.
 
-    chain = LLMChain(llm=chat, prompt=SQL_prompt)
-    response = chain.run(user_input=SQL_prompt)
-    SQL_query = extract_sql_from_response(response)
+        # Database Schema
+        {schema_info}
+        
+        # User Query
+        "{user_input}"
 
-    SQL_result = execute_bigquery_sql(SQL_query)
+        # Result limit
+        Always limit results to not overwhelm the context window at
+        LIMIT < 50;
 
-    final_prompt = create_final_prompt(user_input, SQL_result)
+        
+        """,
+    )
 
-    return chain.run(user_input=final_prompt)
+    sql_generation_chain = LLMChain(llm=chat, prompt=sql_prompt_template)
 
+    # Run the SQL generation chain
+    sql_response = sql_generation_chain.run(
+        user_input=user_input, schema_info=SCHEMA_INFO
+    )
 
-def create_sql_generation_prompt(user_query, schema_info):
-    return f"""
-    # Data source
-    FROM `bigquery-public-data.google_trends.top_terms`
+    # Extract the SQL query
+    SQL_query = extract_sql_from_response(sql_response)
+    say("Querying the database with:")
+    say(SQL_query)
+    # Execute the SQL query
+    formatted_result, error = execute_bigquery_sql(SQL_query)
+    say("Here's what I found:")
+    say(f"```{formatted_result}```")
 
-    # Database Schema
-    {schema_info}
-    
-    # User Query
-    "{user_query}"
-    
-    # Instructions
-     
-    Write a syntactically valid BigQuery Standard SQL query that answers the user’s question using only the schema provided. 
-    Do not include any data modification statements (e.g., INSERT, UPDATE, DELETE).
-    Return only the SQL query, wrapped in ```sql``` tags — no additional text, explanation, or formatting.
+    if error:
+        return f"Error executing SQL query: {error}"
 
-    """
+    # 2. Final Response Chain
+    final_prompt_template = PromptTemplate(
+        input_variables=["user_query", "sql_result"],
+        template="""
+        # Context
+        You are a helpful data analyst.
 
+        # Table
+        Use ONLY the data in the table below to answer the question. Do not use external knowledge.
 
-def create_final_prompt(user_query, SQL_result):
-    return f"""
-    # Context
-    You are a helpful data analyst.
+        {sql_result}
 
-    # Table
-    Use ONLY the data in the table below to answer the question. Do not make assumptions or use external knowledge.
+        # User Question
+        {user_query}
 
-    {SQL_result}
+        # Instructions
+        - Answer the question based only on the table above.
+        - Be concise and specific.
+        - If the answer is not clearly supported by the data, say so.
+        """,
+    )
 
-    # User Question
-    {user_query}
+    final_response_chain = LLMChain(llm=chat, prompt=final_prompt_template)
 
-    # Instructions
-    - Answer the question based only on the table above.
-    - Be concise and specific.
-    - If the answer is not clearly supported by the data, say so.
-    """
+    # Run the final response chain
+    return final_response_chain.run(user_query=user_input, sql_result=formatted_result)
 
 
 def extract_sql_from_response(llm_response):
@@ -120,11 +154,6 @@ def extract_sql_from_response(llm_response):
     else:
         # Fallback if no code blocks found
         return llm_response.strip()
-
-
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv(
-    "GOOGLE_APPLICATION_CREDENTIALS"
-)
 
 
 def execute_bigquery_sql(sql_query, timeout=30):
