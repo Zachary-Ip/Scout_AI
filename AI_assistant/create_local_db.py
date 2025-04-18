@@ -3,8 +3,8 @@ import sqlite3
 
 # Define your files and table names
 csv_files = {
-    "student_survey": "data/in1.csv",
-    "student_demographic": "data/student_data.csv",
+    "student_survey": "data/student_survey.csv",
+    "student_demographic": "data/student_demographics.csv",
 }
 
 # Create (or connect to) SQLite database

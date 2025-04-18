@@ -6,6 +6,8 @@ from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
 from langchain_community.chat_models import ChatOpenAI
 from tabulate import tabulate
+import sqlite3
+import pandas as pd
 
 load_dotenv(find_dotenv())
 OPENAI_API_KEY = os.getenv("OPENAI_KEY")
@@ -19,12 +21,88 @@ Columns:
 - rank (INTEGER): The rank of the term for that week and DMA
 """
 
+SURVEY_SCHEMA = """
+Table: student_survey
+This table contains survey results where each column corresponds to a student self-assessment question.
+All responses are numeric, ranging from 0 to 4:
+    0 = Never / Very Poor
+    1 = Rarely / Poor
+    2 = Sometimes / Average
+    3 = Most of the time / Good
+    4 = Always / Excellent
+
+Each column is listed below as: [Column Name]: [Question]
+
+GPA: Student's  (on a 4-point scale)
+Q1: Do you make time for exercise and socializing?
+Q2: Do you get at least 6 hours of sleep per night?
+Q3: Do you study at least 2 hours for every hour of class?
+Q4: Do you have a consistent study location?
+Q5: Is your study area quiet, comfortable, and distraction-free?
+Q6: Can you study for 30+ minutes without breaks?
+Q7: Do you use time between classes for studying?
+Q8: Do you begin reviewing for major exams 3+ days in advance?
+Q9: Do you know what kinds of questions will be on tests?
+Q10: Are you able to finish tests in the allowed time?
+Q11: Do you complete assignments without using solution guides?
+Q12: Do you ask questions in class when you're confused?
+Q13: Can you take notes, keep up, and understand during lectures?
+Q14: Do you review your notes shortly after class?
+Q15: Do you annotate/highlight class materials while reading?
+Q16: Can you read 12–15 pages/hour for history-type material?
+Q17: Can you understand readings without needing to re-read?
+Q18: Do you adjust your reading style for different subjects?
+"""
+
+DEMOGRAPHIC_SCHEMA = """
+Table: student_demographic
+This database contains demographic and lifestyle data for students, including academic performance over three years. The table contains one row per student.
+
+Column Name: Description (Data Type)
+
+- sex: Student's biological sex (STRING; e.g., 'M', 'F')
+- age: Age in years (INTEGER)
+- environment: Type of residence environment (STRING; e.g., 'urban', 'rural')
+- famsize: Family size category (STRING; e.g., ≤3, 3+)
+- parent_living_situ: Living situation with parents (STRING; e.g., 'together', 'apart')
+
+- Mother_edu: Mother's education level (INTEGER; e.g., 0–5 scale)
+- Father_edu: Father's education level (INTEGER)
+- Mjob: Mother's occupation (STRING; e.g., 'teacher', 'services', 'health')
+- Fjob: Father's occupation (STRING)
+- guardian: Primary guardian (STRING; e.g., 'mother', 'father', 'other')
+
+- traveltime: Commute time to school (INTEGER; e.g., 0–5 scale)
+- studytime: Weekly study time (INTEGER)
+- failures: Number of past academic failures (INTEGER)
+- extra_classes: Enrolled in additional paid classes (BOOLEAN or STRING; e.g., 'yes', 'no')
+- family_support: Extra educational support from family (BOOLEAN or STRING)
+
+- paid: Attending paid tutoring (BOOLEAN or STRING)
+- activities: Participates in extracurriculars (BOOLEAN or STRING)
+- nursery: Attended nursery school (BOOLEAN or STRING)
+- internet: Has Internet access at home (BOOLEAN or STRING)
+- romantic: Currently in a romantic relationship (BOOLEAN or STRING)
+
+- family_quality: Quality of family relationships (INTEGER; e.g., 0–5 scale)
+- freetime: Free time after school (INTEGER)
+- goout: Frequency of going out with friends (INTEGER)
+- Weekday_alchohol: Weekday alcohol consumption (INTEGER)
+- Weekend_alchohol: Weekend alcohol consumption (INTEGER)
+- health: Self-reported health status (INTEGER)
+- num_absences: Number of school absences (INTEGER)
+
+- Yr_1_Grade: Final grade for Year 1 (FLOAT; 0 - 1.0)
+- Yr_2_Grade: Final grade for Year 2 (FLOAT)
+- Yr_3_Grade: Final grade for Year 3 (FLOAT)
+"""
+
 
 def RAG_response(user_input, say):
     # Initialize chat model
     chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=1)
 
-    # 1. Routing and massaging query
+    # Prompt templates
     senior_prompt_template = PromptTemplate(
         input_variables=["user_input"],
         template="""
@@ -34,7 +112,7 @@ def RAG_response(user_input, say):
         # Available Data
         You have access to 2 data sets:
             1. student survey data - a qualtrics survey of student study habits on a scale from 1 (never) to 5 (always), and GPA
-            2. student demographic data - a table containing demographic data (e.g. age, gender, parents education), and grades in 3 classes
+            2. student demographic data - a table containing demographic data (e.g. age, gender, parents education), and grades across 3 years
         
         # User Question
         "{user_query}"
@@ -57,29 +135,20 @@ def RAG_response(user_input, say):
     """,
     )
 
-    senior_chain = LLMChain(llm=chat, prompt=senior_prompt_template)
-
-    # Run the SQL generation chain
-    senior_response = senior_chain.run(user_input=user_input)
-
-    if senior_response.startswith("RETURN: "):
-        senior_response.strip("RETURN: ")
-        say(senior_response)
-
-    # 1. SQL Generation Chain
     sql_prompt_template = PromptTemplate(
         input_variables=["user_input", "schema_info"],
         template="""
+        # Role
+        You are a senior data scientist providing insight to a question by creating an SQL query for a database.
+
         # Instructions
          
         Write a syntactically valid BigQuery Standard SQL query that answers the user's question using only the schema provided. 
-        Do not include any data modification statements (e.g., INSERT, UPDATE, DELETE).
-        Return only the SQL query, wrapped in ```sql``` tags — no additional text, explanation, or formatting.
 
-        The data contains individual ranks of search terms for each week, and DMA, so querys that ask for 
-        "highest ranking terms" without other specification will need to average across these terms to retrieve sensible values
+        - The question may not use the exact same words or names as the columns, so use your best judgement to map the question to the schema provided, but make sure you closely follow the schema.
+        - Do not include any data modification statements (e.g., INSERT, UPDATE, DELETE).
+        - Return only the SQL query, wrapped in ```sql``` tags — no additional text, explanation, or formatting.
 
-        Also, it may be neccesary to re-rank  the outputs based on the score paremeter due to averageing across week or DMA area.
 
         # Database Schema
         {schema_info}
@@ -95,51 +164,64 @@ def RAG_response(user_input, say):
         """,
     )
 
-    sql_generation_chain = LLMChain(llm=chat, prompt=sql_prompt_template)
-
-    # Run the SQL generation chain
-    sql_response = sql_generation_chain.run(
-        user_input=user_input, schema_info=SCHEMA_INFO
-    )
-
-    # Extract the SQL query
-    SQL_query = extract_sql_from_response(sql_response)
-    say("Querying the database with:")
-    say(SQL_query)
-    # Execute the SQL query
-    formatted_result, error = execute_bigquery_sql(SQL_query)
-    say("Here's what I found:")
-    say(f"```{formatted_result}```")
-
-    if error:
-        return f"Error executing SQL query: {error}"
-
-    # 2. Final Response Chain
     final_prompt_template = PromptTemplate(
         input_variables=["user_query", "sql_result"],
         template="""
         # Context
-        You are a helpful data analyst.
-
-        # Table
-        Use ONLY the data in the table below to answer the question. Do not use external knowledge.
+        You are a senior data scientist. A junior data scientist has performed an SQL query and given you the results. Use the information provided to synthesis an answer to the user question. 
+        - Do not use external knowledge, but you may assume that you have been provided enough information to answer the question, even if the table does not explicitly state it. 
+        - If the answer is not clearly supported by the data, say so.
+        Example:
 
         {sql_result}
 
         # User Question
         {user_query}
-
-        # Instructions
-        - Answer the question based only on the table above.
-        - Be concise and specific.
-        - If the answer is not clearly supported by the data, say so.
         """,
     )
 
+    # Initialize chains
+
+    senior_chain = LLMChain(llm=chat, prompt=senior_prompt_template)
+    sql_generation_chain = LLMChain(llm=chat, prompt=sql_prompt_template)
     final_response_chain = LLMChain(llm=chat, prompt=final_prompt_template)
 
+    # Run the SQL generation chain
+    senior_response = senior_chain.run(user_input=user_input)
+
+    if senior_response.startswith("RETURN: "):
+        return senior_response.strip("RETURN: ")
+    elif senior_response.startswith("CONTINUE: "):
+        senior_response = senior_response.strip("CONTINUE: ")
+        if senior_response.startswith("SURVEY: "):
+            # Run the SQL generation chain
+            sql_response = sql_generation_chain.run(
+                user_input=user_input, schema_info=SURVEY_SCHEMA
+            )
+        elif senior_response.startswith("DEMOGRAPHIC: "):
+            sql_response = sql_generation_chain.run(
+                user_input=user_input, schema_info=DEMOGRAPHIC_SCHEMA
+            )
+
+        # Extract the SQL query
+        SQL_query = extract_sql_from_response(sql_response)
+        say("Querying the database with:")
+        say(SQL_query)
+
+        # Execute the SQL query
+        conn = sqlite3.connect("student.db")
+        df = pd.read_sql_query("SELECT * FROM survey_responses LIMIT 5", conn)
+        text_table = df.to_markdown(index=False)
+        say("Here's what I found:")
+        say(f"```{text_table}```")
+
+    else:
+        return f"ERROR, template not strict enough. Chat responded: {senior_response}"
+
+    # 2. Final Response Chain
+
     # Run the final response chain
-    return final_response_chain.run(user_query=user_input, sql_result=formatted_result)
+    return final_response_chain.run(user_query=user_input, sql_result=text_table)
 
 
 def extract_sql_from_response(llm_response):
