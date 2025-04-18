@@ -62,22 +62,22 @@ This database contains demographic and lifestyle data for students, including ac
 
 Column Name: Description (Data Type)
 
-- sex: Student's biological sex (STRING; e.g., 'M', 'F')
+- sex: Student's biological sex (STRING;'M', 'F')
 - age: Age in years (INTEGER)
-- environment: Type of residence environment (STRING; e.g., 'urban', 'rural')
-- famsize: Family size category (STRING; e.g., ≤3, 3+)
-- parent_living_situ: Living situation with parents (STRING; e.g., 'together', 'apart')
+- environment: Type of residence environment (STRING; 'Urban', 'Rural')
+- famsize: Family size category (STRING; <3, >3)
+- parent_living_situ: Living situation with parents (STRING; 'Together', 'Apart')
 
-- Mother_edu: Mother's education level (INTEGER; e.g., 0–5 scale)
+- Mother_edu: Mother's education level (INTEGER; 0–5 scale)
 - Father_edu: Father's education level (INTEGER)
-- Mjob: Mother's occupation (STRING; e.g., 'teacher', 'services', 'health')
+- Mjob: Mother's occupation (STRING;'teacher', 'services', 'health')
 - Fjob: Father's occupation (STRING)
-- guardian: Primary guardian (STRING; e.g., 'mother', 'father', 'other')
+- guardian: Primary guardian (STRING; 'mother', 'father', 'other')
 
-- traveltime: Commute time to school (INTEGER; e.g., 0–5 scale)
+- traveltime: Commute time to school (INTEGER; 0–5 scale)
 - studytime: Weekly study time (INTEGER)
 - failures: Number of past academic failures (INTEGER)
-- extra_classes: Enrolled in additional paid classes (BOOLEAN or STRING; e.g., 'yes', 'no')
+- extra_classes: Enrolled in additional paid classes (BOOLEAN or STRING;'yes', 'no')
 - family_support: Extra educational support from family (BOOLEAN or STRING)
 
 - paid: Attending paid tutoring (BOOLEAN or STRING)
@@ -86,7 +86,7 @@ Column Name: Description (Data Type)
 - internet: Has Internet access at home (BOOLEAN or STRING)
 - romantic: Currently in a romantic relationship (BOOLEAN or STRING)
 
-- family_quality: Quality of family relationships (INTEGER; e.g., 0–5 scale)
+- family_quality: Quality of family relationships (INTEGER; 0–5 scale)
 - freetime: Free time after school (INTEGER)
 - goout: Frequency of going out with friends (INTEGER)
 - Weekday_alchohol: Weekday alcohol consumption (INTEGER)
@@ -130,21 +130,23 @@ def RAG_response(user_query, say):
         "{user_query}"
         
         # Instructions
-        1. Determine if the question can be answered using the available data.
+       
         
-        2. If the question CANNOT be answered with the available data, if the question is too vague, or if the question is too advanced for a simple SQL query:
-        - Start your response with "RETURN: " followed by a brief explanation
-        - Example: "RETURN: This question requires financial data not available in the schema."
-        - Example: "RETURN: I am unable to do compare the relative effictiveness of studying vs drinking in a single query.
+        1. Determine if the question is relevant to the available tables.
+        
+        2. If the question CANNOT be answered with the available data, or if the question is too vague, or if the question is too advanced for a simple SQL query:
+        - Start your response with "RETURN " followed by a brief explanation
+        - Example: "RETURN This question requires financial data not available in the schema."
         
         3. If the question CAN be answered with the available data:
-        - Start your response with "CONTINUE: " then either "SURVEY: " or "DEMOGRAPHIC: ", depending on which table is more appropriate for the question 
+        - Start your response with "CONTINUE" then either "SURVEY" or "DEMOGRAPHIC", depending on which table is more appropriate for the question 
 
-        4. Finally, rephrase the question for the junior data scientist
-        - The junior data scientist will have access to the full data schema
+        4. Finally, Determine what underlying data is neccesary to answer a question
+            Example: 
+            - Q. Does alcohol negatively affect grades?
+            - A. It sounds like you want to filter the table to show alcohol usage and grades
+        - Rephrase the question to isolate data from the database that is relevant to the question
         - The query should be concise and include only essential columns
-        - Use GROUP BY, aggregation functions (AVG, COUNT, etc.) when appropriate for summarization
-        - Include proper WHERE clauses to filter irrelevant data
         - Limit results to a reasonable number if returning raw records
         - Do not use INSERT, UPDATE, or DELETE statements
     """,
@@ -203,13 +205,13 @@ def RAG_response(user_query, say):
 
     # Run the SQL generation chain
     senior_response = senior_chain.invoke(input={"user_query": user_query})
-    senior_text = senior_response.text()
-    if senior_text.startswith("RETURN: "):
-        return senior_text.strip("RETURN: ")
-    elif senior_text.startswith("CONTINUE: "):
-        senior_text = senior_text.strip("CONTINUE: ")
-        if senior_text.startswith("SURVEY: "):
-            senior_text = senior_text.strip("SURVEY: ")
+    senior_text = senior_response.text().strip()
+    if senior_text.startswith("RETURN"):
+        return senior_text.strip("RETURN")
+    elif senior_text.startswith("CONTINUE"):
+        senior_text = senior_text.strip("CONTINUE").strip()
+        if senior_text.startswith("SURVEY"):
+            senior_text = senior_text.strip("SURVEY").strip()
             say("That seems like a good question for the Survey table")
             # Run the SQL generation chain
             sql_response = sql_generation_chain.invoke(
@@ -218,9 +220,9 @@ def RAG_response(user_query, say):
                     "schema_info": SURVEY_SCHEMA,
                 }
             )
-        elif senior_text.startswith("DEMOGRAPHIC: "):
+        elif senior_text.startswith("DEMOGRAPHIC"):
             say("That seems like a good question for the Demographic table")
-            senior_text = senior_text.strip("DEMOGRAPHIC: ")
+            senior_text = senior_text.strip("DEMOGRAPHIC").strip()
             sql_response = sql_generation_chain.invoke(
                 input={
                     "user_query": senior_text,
@@ -228,7 +230,7 @@ def RAG_response(user_query, say):
                 }
             )
         else:
-            say("I was not able to route you to an appropriate table.")
+            return f"ERROR: I was not able to route you to an appropriate table. \n Response: \n {senior_text}"
         say(f"Let's try phrasing your question like this: {senior_text}")
         # Extract the SQL query
         SQL_query = extract_sql_from_response(sql_response.text())
