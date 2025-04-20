@@ -11,68 +11,59 @@ from tabulate import tabulate
 
 load_dotenv(find_dotenv())
 OPENAI_API_KEY = os.getenv("OPENAI_KEY")
-SCHEMA_INFO = """
-Table: bigquery-public-data.google_trends.top_terms
-Columns:
-- dma_name (STRING): The name of the designated market area
-- term (STRING): The search term
-- week (DATE): The week of the trend data
-- score (INTEGER): The popularity score of the term
-- rank (INTEGER): The rank of the term for that week and DMA
-"""
 
-SURVEY_SCHEMA = """
+# SURVEY_SCHEMA = """
 
-# TABLE TO QUERY FROM: student_survey
+# # TABLE TO QUERY FROM: student_survey
 
-This table contains survey results where each column corresponds to a student self-assessment question.
-All responses are numeric, ranging from 0 to 4:
-    0 = Never / Very Poor
-    1 = Rarely / Poor
-    2 = Sometimes / Average
-    3 = Most of the time / Good
-    4 = Always / Excellent
+# This table contains survey results where each column corresponds to a student self-assessment question.
+# All responses are numeric, ranging from 0 to 4:
+#     0 = Never / Very Poor
+#     1 = Rarely / Poor
+#     2 = Sometimes / Average
+#     3 = Most of the time / Good
+#     4 = Always / Excellent
 
-Each column is listed below as: [Column Name]: [Question]
+# Each column is listed below as: [Column Name]: [Question]
 
-GPA: Student's  (on a 4-point scale)
-Q1: Do you make time for exercise and socializing?
-Q2: Do you get at least 6 hours of sleep per night?
-Q3: Do you study at least 2 hours for every hour of class?
-Q4: Do you have a consistent study location?
-Q5: Is your study area quiet, comfortable, and distraction-free?
-Q6: Can you study for 30+ minutes without breaks?
-Q7: Do you use time between classes for studying?
-Q8: Do you begin reviewing for major exams 3+ days in advance?
-Q9: Do you know what kinds of questions will be on tests?
-Q10: Are you able to finish tests in the allowed time?
-Q11: Do you complete assignments without using solution guides?
-Q12: Do you ask questions in class when you're confused?
-Q13: Can you take notes, keep up, and understand during lectures?
-Q14: Do you review your notes shortly after class?
-Q15: Do you annotate/highlight class materials while reading?
-Q16: Can you read 12–15 pages/hour for history-type material?
-Q17: Can you understand readings without needing to re-read?
-Q18: Do you adjust your reading style for different subjects?
-"""
+# GPA: Student's  (on a 4-point scale)
+# Q1: Do you make time for exercise and socializing?
+# Q2: Do you get at least 6 hours of sleep per night?
+# Q3: Do you study at least 2 hours for every hour of class?
+# Q4: Do you have a consistent study location?
+# Q5: Is your study area quiet, comfortable, and distraction-free?
+# Q6: Can you study for 30+ minutes without breaks?
+# Q7: Do you use time between classes for studying?
+# Q8: Do you begin reviewing for major exams 3+ days in advance?
+# Q9: Do you know what kinds of questions will be on tests?
+# Q10: Are you able to finish tests in the allowed time?
+# Q11: Do you complete assignments without using solution guides?
+# Q12: Do you ask questions in class when you're confused?
+# Q13: Can you take notes, keep up, and understand during lectures?
+# Q14: Do you review your notes shortly after class?
+# Q15: Do you annotate/highlight class materials while reading?
+# Q16: Can you read 12–15 pages/hour for history-type material?
+# Q17: Can you understand readings without needing to re-read?
+# Q18: Do you adjust your reading style for different subjects?
+# """
 
-SURVEY_QUERY = """
-A query structured like this is preferred if relevant:
-```
-SELECT
-    <Q_x> AS <x_label>,
-    COUNT(*) AS Student_Count,
-    ROUND(AVG(<Q_y>), 2) AS Avg_<y_label>,
-    ROUND(AVG(GPA), 2) AS Avg_GPA
-FROM
-    student_survey
-GROUP BY
-    <Q_x>
-ORDER BY
-    <Q_x>;
-```
-Expand the number of labels as neccessary for relevant questions.
-"""
+# SURVEY_QUERY = """
+# A query structured like this is preferred if relevant:
+# ```
+# SELECT
+#     <Q_x> AS <x_label>,
+#     COUNT(*) AS Student_Count,
+#     ROUND(AVG(<Q_y>), 2) AS Avg_<y_label>,
+#     ROUND(AVG(GPA), 2) AS Avg_GPA
+# FROM
+#     student_survey
+# GROUP BY
+#     <Q_x>
+# ORDER BY
+#     <Q_x>;
+# ```
+# Expand the number of labels as neccessary for relevant questions.
+# """
 
 DEMOGRAPHIC_SCHEMA = """
 # TABLE TO QUERY FROM: student_demographic
@@ -122,8 +113,7 @@ A query structured like this is preferred if relevant:
 ```
 SELECT 
     <categorical_column>,
-    ROUND(AVG(<continuous_column>), 2) AS Avg,
-    ROUND(SQRT(AVG(<continuous_column>*<continuous_column>) - AVG(<continuous_column>)*AVG(<continuous_column>)), 2) AS Std
+    ROUND(AVG(<continuous_column>), 2) AS <continuous_column>_Avg,
 FROM 
     <table_name>
 GROUP BY 
@@ -147,60 +137,46 @@ def RAG_response(user_query, say):
 
     # Prompt templates
     senior_prompt_template = PromptTemplate(
-        input_variables=["user_query"],
+        input_variables=["user_query", "schema_info"],
         template="""
         # Role
-        You are a senior data scientist helping to translate user questions for a junior data scientist to create an SQL query for.
-        
-        # Available Data
-        You have access to 2 data sets:
-            1. student survey data - a survey of student study habits on a scale from 1 (never) to 5 (always), and GPA. Questions cover topics like: 
-            - "did you sleep 6 hours"
-            - "do you ask questions in class"
-            - "Do you review notes"
-            - current GPA (no year specified)
+        You are a senior data scientist helping to break down a user questions to understand what data would be needed to answer it.
 
-            2. student demographic data - a table containing demographic data grades across 3 years. Contains information such as
-            - Age of student
-            - environment (rural vs urban)
-            - parents education (ranks 1-5), status (together, separated)
-            - self reported free time, study time, family relationship, alcohol usage
-            - absences and grades for years 1 through 3
+        # Available Data
+        
+        {schema_info}
         
         # User Question
         "{user_query}"
         
         # Instructions
        
-        1. Determine if the question is relevant to the available tables.
+        1. Determine if the question is relevant to the available table.
         
         2. If the question CANNOT be answered with the available data, or if the question is too vague
         - Start your response with "RETURN " followed by a brief explanation
         - Example: "RETURN This question requires financial data not available in the schema."
         
-        3. If the question CAN be answered with the available data:
-        - Start your response with "CONTINUE" then either "SURVEY" or "DEMOGRAPHIC", depending on which table is more appropriate for the question 
-
-        4. Finally, Determine what underlying data is neccesary to answer a question
+        3. If the question CAN be answered with the available data start your response with CONTINUE
+        
+        4. Determine what underlying data is neccesary to answer a question
             Example: 
             - Q. Does alcohol negatively affect grades?
             - A. It sounds like you want to select columns related to alcohol use and grades, look at the average grade columns by grouping the alcohol columns
-        - Rephrase the question to isolate data from the database that is relevant to the question
-        - The query should be concise and include only essential columns
-        - Limit results to a reasonable number if returning raw records
-        - Do not use INSERT, UPDATE, or DELETE statements
+        - Reply only requesting to isolate the data that would be neccesary to answer the question
     """,
     )
 
     sql_prompt_template = PromptTemplate(
-        input_variables=["user_input", "schema_info", "query_structure"],
+        input_variables=[
+            "user_input",
+            "schema_info",
+            "query_structure",
+        ],
         template="""
-        # Role
-        You are a senior data scientist providing insight to a question by creating an SQL query for a database.
-
         # Instructions
          
-        Write a syntactically valid BigQuery Standard SQL query that answers the user's question using only the schema provided. 
+        Write a syntactically valid sqlite3 query that answers the user's question using only the schema provided. 
         
         {query_structure}
 
@@ -240,39 +216,26 @@ def RAG_response(user_query, say):
     final_response_chain = final_prompt_template | chat
 
     # Run the SQL generation chain
-    senior_response = senior_chain.invoke(input={"user_query": user_query})
+    senior_response = senior_chain.invoke(
+        input={
+            "user_query": user_query,
+            "schema_info": DEMOGRAPHIC_SCHEMA,
+        }
+    )
     senior_text = senior_response.text().strip()
     if senior_text.startswith("RETURN"):
         return senior_text.strip("RETURN")
     elif senior_text.startswith("CONTINUE"):
         senior_text = senior_text.strip("CONTINUE").strip()
-        if senior_text.startswith("SURVEY"):
-            senior_text = senior_text.strip("SURVEY").strip()
-            if debug:
-                say("That seems like a good question for the Survey table")
-            # Run the SQL generation chain
-            sql_response = sql_generation_chain.invoke(
-                input={
-                    "user_input": senior_text,
-                    "schema_info": SURVEY_SCHEMA,
-                    "query_structure": SURVEY_QUERY,
-                }
-            )
-        elif senior_text.startswith("DEMOGRAPHIC"):
-            if debug:
-                say("That seems like a good question for the Demographic table")
-            senior_text = senior_text.strip("DEMOGRAPHIC").strip()
-            sql_response = sql_generation_chain.invoke(
-                input={
-                    "user_input": senior_text,
-                    "schema_info": DEMOGRAPHIC_SCHEMA,
-                    "query_structure": DEMOGRAPHIC_QUERY,
-                }
-            )
-        else:
-            return f"`ERROR: I was not able to route you to an appropriate table.` \n Response: \n ```{senior_text}```"
+        sql_response = sql_generation_chain.invoke(
+            input={
+                "user_input": user_query,
+                "schema_info": DEMOGRAPHIC_SCHEMA,
+                "query_structure": DEMOGRAPHIC_QUERY,
+            }
+        )
         if debug:
-            say(f"Let's try phrasing your question like this: {senior_text}")
+            say(senior_text)
         # Extract the SQL query
         SQL_query = extract_sql_from_response(sql_response.text())
         if debug:

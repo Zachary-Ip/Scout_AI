@@ -5,7 +5,7 @@ from dotenv import find_dotenv, load_dotenv
 from flask import Flask, jsonify, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
-from slack_functions import DEMOGRAPHIC_SCHEMA, SURVEY_SCHEMA, RAG_response
+from slack_functions import DEMOGRAPHIC_SCHEMA, RAG_response
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
@@ -90,12 +90,6 @@ def handle_mentions(body, say):
         say(
             f"""
             Here is more information about the dataset I have access to:
-            ```
-            Student Survey Data
-
-            {SURVEY_SCHEMA}
-            ```
-            Student Demographic Data
             ```
             {DEMOGRAPHIC_SCHEMA}
             ```
