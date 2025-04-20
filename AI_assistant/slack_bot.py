@@ -32,17 +32,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# TODO:
-# 3. Determine if dataset is relevant to question being asked, if so, CONTINUE and rephrase the question in a way
-#     that would easily be parsed as a SQL query, emphasize that resulting data needs to fit in limited context
-#     window, so it should utilize as many group, average, and summary functions as possible.
-#      ELSE RETURN and ask for clarification, reiterating capabilities
-# 4. try to add an exception if the ask seems too advanced for a simple SQL query, prompt a resonse to create a ticket with
-#     the data science department
-# 5. Figure out how to automatically report tickets to a new channel
-# 6. Figure out how to add memory
-
 # Out of VS code
 # create slide deck showing structure < - emphasize scalability and modularity
 # create slides for vision of position, working in tandem with bot to identify trends and Business questions automatically
@@ -87,22 +76,29 @@ def handle_mentions(body, say):
     if "intro" in text.lower() or "hello" in text.lower():
         say(
             """
-            Hello! I am a virtual assistant designed to help you answer questions regarding a dataset containing student data. 
-            Try asking me a question like, "Do students who study longer or earlier for exams perform better?"
+            Hey there! 👋 I’m Scout — your trusty data guide. I'm here to quickly find answers for you from our database.
+        Just @Scout with your question to get started!
+        Example: "@Scout Does studying lead to better grades?"
+
+        Get more details on the available data by asking me what datasets I have access to.
+
+        If you want to see how I think, start your question with debug!
+        Example: "DEBUG Does weekday alchohol usage correlate with absences? @Scout"
             """
         )
     elif "dataset" in text.lower() or "access" in text.lower():
         say(
             f"""
             Here is more information about the dataset I have access to:
-
-            # Student Survey Data
+            ```
+            Student Survey Data
 
             {SURVEY_SCHEMA}
-
-            # Student Demographic Data
-
+            ```
+            Student Demographic Data
+            ```
             {DEMOGRAPHIC_SCHEMA}
+            ```
         """
         )
     else:

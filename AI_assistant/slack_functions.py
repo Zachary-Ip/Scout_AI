@@ -56,6 +56,24 @@ Q17: Can you understand readings without needing to re-read?
 Q18: Do you adjust your reading style for different subjects?
 """
 
+SURVEY_QUERY = """
+A query structured like this is preferred if relevant:
+```
+SELECT
+    <Q_x> AS <x_label>,
+    COUNT(*) AS Student_Count,
+    ROUND(AVG(<Q_y>), 2) AS Avg_<y_label>,
+    ROUND(AVG(GPA), 2) AS Avg_GPA
+FROM
+    student_survey
+GROUP BY
+    <Q_x>
+ORDER BY
+    <Q_x>;
+```
+Expand the number of labels as neccessary for relevant questions.
+"""
+
 DEMOGRAPHIC_SCHEMA = """
 # TABLE TO QUERY FROM: student_demographic
 This database contains demographic and lifestyle data for students, including academic performance over three years. The table contains one row per student.
@@ -99,10 +117,33 @@ Column Name: Description (Data Type)
 - Yr_3_Grade: Final grade for Year 3 (FLOAT)
 """
 
+DEMOGRAPHIC_QUERY = """
+A query structured like this is preferred if relevant:
+```
+SELECT 
+    <categorical_column>,
+    ROUND(AVG(<continuous_column>), 2) AS Avg,
+    ROUND(SQRT(AVG(<continuous_column>*<continuous_column>) - AVG(<continuous_column>)*AVG(<continuous_column>)), 2) AS Std
+FROM 
+    <table_name>
+GROUP BY 
+    <categorical_column>
+ORDER BY 
+    <categorical_column>;
+```
+Replace:
+- <categorical_column> with the relevant categorical column from my data (e.g., Gender, Ethnicity)
+- <continuous_column> with the relevant continuous variable to analyze (e.g., Yr_1_Grade, num_absences, traveltime)
+- <table_name> with the appropriate table name
+"""
+
 
 def RAG_response(user_query, say):
     # Initialize chat model
-    chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=1)
+    chat = ChatOpenAI(model_name="gpt-4o", temperature=1)
+
+    # Long form replies
+    debug = True if user_query.strip().startswith("DEBUG") else False
 
     # Prompt templates
     senior_prompt_template = PromptTemplate(
@@ -131,10 +172,9 @@ def RAG_response(user_query, say):
         
         # Instructions
        
-        
         1. Determine if the question is relevant to the available tables.
         
-        2. If the question CANNOT be answered with the available data, or if the question is too vague, or if the question is too advanced for a simple SQL query:
+        2. If the question CANNOT be answered with the available data, or if the question is too vague
         - Start your response with "RETURN " followed by a brief explanation
         - Example: "RETURN This question requires financial data not available in the schema."
         
@@ -144,7 +184,7 @@ def RAG_response(user_query, say):
         4. Finally, Determine what underlying data is neccesary to answer a question
             Example: 
             - Q. Does alcohol negatively affect grades?
-            - A. It sounds like you want to filter the table to show alcohol usage and grades
+            - A. It sounds like you want to select columns related to alcohol use and grades, look at the average grade columns by grouping the alcohol columns
         - Rephrase the question to isolate data from the database that is relevant to the question
         - The query should be concise and include only essential columns
         - Limit results to a reasonable number if returning raw records
@@ -153,7 +193,7 @@ def RAG_response(user_query, say):
     )
 
     sql_prompt_template = PromptTemplate(
-        input_variables=["user_query", "schema_info"],
+        input_variables=["user_input", "schema_info", "query_structure"],
         template="""
         # Role
         You are a senior data scientist providing insight to a question by creating an SQL query for a database.
@@ -161,8 +201,10 @@ def RAG_response(user_query, say):
         # Instructions
          
         Write a syntactically valid BigQuery Standard SQL query that answers the user's question using only the schema provided. 
+        
+        {query_structure}
 
-        - The question may not use the exact same words or names as the columns, so use your best judgement to map the question to the schema provided, but make sure you closely follow the schema.
+        - The question might not use the exact same words or names as the columns, so use your best judgement to map the question to the schema provided.
         - Do not include any data modification statements (e.g., INSERT, UPDATE, DELETE).
         - Return only the SQL query, wrapped in ```sql``` tags — no additional text, explanation, or formatting.
 
@@ -171,13 +213,7 @@ def RAG_response(user_query, say):
         {schema_info}
         
         # User Query
-        "{user_query}"
-
-        # Result limit
-        Always limit results to not overwhelm the context window at
-        LIMIT < 50;
-
-        
+        "{user_input}"    
         """,
     )
 
@@ -212,40 +248,50 @@ def RAG_response(user_query, say):
         senior_text = senior_text.strip("CONTINUE").strip()
         if senior_text.startswith("SURVEY"):
             senior_text = senior_text.strip("SURVEY").strip()
-            say("That seems like a good question for the Survey table")
+            if debug:
+                say("That seems like a good question for the Survey table")
             # Run the SQL generation chain
             sql_response = sql_generation_chain.invoke(
                 input={
-                    "user_query": senior_text,
+                    "user_input": senior_text,
                     "schema_info": SURVEY_SCHEMA,
+                    "query_structure": SURVEY_QUERY,
                 }
             )
         elif senior_text.startswith("DEMOGRAPHIC"):
-            say("That seems like a good question for the Demographic table")
+            if debug:
+                say("That seems like a good question for the Demographic table")
             senior_text = senior_text.strip("DEMOGRAPHIC").strip()
             sql_response = sql_generation_chain.invoke(
                 input={
-                    "user_query": senior_text,
+                    "user_input": senior_text,
                     "schema_info": DEMOGRAPHIC_SCHEMA,
+                    "query_structure": DEMOGRAPHIC_QUERY,
                 }
             )
         else:
-            return f"ERROR: I was not able to route you to an appropriate table. \n Response: \n {senior_text}"
-        say(f"Let's try phrasing your question like this: {senior_text}")
+            return f"`ERROR: I was not able to route you to an appropriate table.` \n Response: \n ```{senior_text}```"
+        if debug:
+            say(f"Let's try phrasing your question like this: {senior_text}")
         # Extract the SQL query
         SQL_query = extract_sql_from_response(sql_response.text())
-        say("Querying the database with:")
-        say(SQL_query)
+        if debug:
+            say("Querying the database with:")
+            say(SQL_query)
 
         # Execute the SQL query
         conn = sqlite3.connect("student.db")
-        df = pd.read_sql_query(SQL_query, conn)
-        text_table = df.to_markdown(index=False)
-        say("Here's what I found:")
-        say(f"```{text_table}```")
+        try:
+            df = pd.read_sql_query(SQL_query, conn)
+            text_table = df.to_markdown(index=False)
+            say("Here's what I found:")
+            say(f"```{text_table}```")
+        except Exception as e:
+            say("`Error retrieving data, invalid query`")
+            print(e)
 
     else:
-        return f"ERROR, template not strict enough. Chat responded: {senior_response.text()}"
+        return f"`ERROR, template not strict enough.` Chat responded:\n``` {senior_response.text()}\n```"
 
     # Run the final response chain
     return final_response_chain.invoke(
