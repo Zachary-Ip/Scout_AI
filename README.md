@@ -2,7 +2,7 @@
 Scout is a lightweight RAG (Retrieval-Augmented Generation) assistant built to demonstrate how natural language interfaces can simplify querying business data. Designed to live in Slack, Scout connects to both SQLite and BigQuery databases, using LangChain to interpret queries and Flask + ngrok to serve responses locally.
 
 ## 🚀 Features
-🔍 Natural language to SQL via LangChain agents
+🔍 Natural language -> SQL -> Interpretation and answers via LangChain agents
 
 🧠 Retrieval-Augmented Generation for accurate, context-aware answers
 
@@ -68,7 +68,7 @@ ngrok http 5000
 ```
 
 ## 💬 Usage
-Once added to a Slack workspace, Scout listens for natural language questions like:
+Once added to a Slack workspace, Scout listens for mentions and responds to natural language questions like:
 
 "@Scout What were sales last quarter?"
 "@Scout How many active users in March?"
@@ -84,17 +84,14 @@ Security, error handling, and scaling have been kept minimal to focus on functio
 Easily extendable to other databases, APIs, or knowledge sources.
 
 ## 🧭 Roadmap Ideas
+✅ Add SQL generation agents
+
 ✅ Add BigQuery + SQLite switching
 
-🔜 Add caching layer
+🔜 Add Vector Database support 
+
+🔜 Add query saving and usage metrics for continous development 
 
 🔜 Basic conversation history memory
 
 🔜 Deploy on cloud + custom domain
-
-## 🤝 Acknowledgments
-LangChain for orchestration
-
-OpenAI for LLM support
-
-ngrok for quick local exposure
