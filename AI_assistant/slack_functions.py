@@ -12,59 +12,6 @@ from tabulate import tabulate
 load_dotenv(find_dotenv())
 OPENAI_API_KEY = os.getenv("OPENAI_KEY")
 
-# SURVEY_SCHEMA = """
-
-# # TABLE TO QUERY FROM: student_survey
-
-# This table contains survey results where each column corresponds to a student self-assessment question.
-# All responses are numeric, ranging from 0 to 4:
-#     0 = Never / Very Poor
-#     1 = Rarely / Poor
-#     2 = Sometimes / Average
-#     3 = Most of the time / Good
-#     4 = Always / Excellent
-
-# Each column is listed below as: [Column Name]: [Question]
-
-# GPA: Student's  (on a 4-point scale)
-# Q1: Do you make time for exercise and socializing?
-# Q2: Do you get at least 6 hours of sleep per night?
-# Q3: Do you study at least 2 hours for every hour of class?
-# Q4: Do you have a consistent study location?
-# Q5: Is your study area quiet, comfortable, and distraction-free?
-# Q6: Can you study for 30+ minutes without breaks?
-# Q7: Do you use time between classes for studying?
-# Q8: Do you begin reviewing for major exams 3+ days in advance?
-# Q9: Do you know what kinds of questions will be on tests?
-# Q10: Are you able to finish tests in the allowed time?
-# Q11: Do you complete assignments without using solution guides?
-# Q12: Do you ask questions in class when you're confused?
-# Q13: Can you take notes, keep up, and understand during lectures?
-# Q14: Do you review your notes shortly after class?
-# Q15: Do you annotate/highlight class materials while reading?
-# Q16: Can you read 12–15 pages/hour for history-type material?
-# Q17: Can you understand readings without needing to re-read?
-# Q18: Do you adjust your reading style for different subjects?
-# """
-
-# SURVEY_QUERY = """
-# A query structured like this is preferred if relevant:
-# ```
-# SELECT
-#     <Q_x> AS <x_label>,
-#     COUNT(*) AS Student_Count,
-#     ROUND(AVG(<Q_y>), 2) AS Avg_<y_label>,
-#     ROUND(AVG(GPA), 2) AS Avg_GPA
-# FROM
-#     student_survey
-# GROUP BY
-#     <Q_x>
-# ORDER BY
-#     <Q_x>;
-# ```
-# Expand the number of labels as neccessary for relevant questions.
-# """
-
 DEMOGRAPHIC_SCHEMA = """
 # TABLE TO QUERY FROM: student_demographic
 This database contains demographic and lifestyle data for students, including academic performance over three years. The table contains one row per student.

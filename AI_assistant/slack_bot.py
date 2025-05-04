@@ -32,14 +32,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Out of VS code
-# create slide deck showing structure < - emphasize scalability and modularity
-# create slides for vision of position, working in tandem with bot to identify trends and Business questions automatically
-# 3 pillars - universal data access, data cleanliness uniformity, detailed bespoke models
-# aggregate queries automatically, build meta assistant that can parse through queries to find trends
-# identify new and desired datastreams (from qualtrics etc)
-# Modify and transform data to be usable by assistant
-
 
 def get_bot_user_id():
     """
@@ -104,12 +96,6 @@ def handle_mentions(body, say):
 
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
-
-    # request_body = request.get_data().decode("utf-8")
-
-    # Log environment variables (be careful not to log actual secrets in production)
-
-    # Verify the request is coming from Slack
     try:
         is_valid = signature_verifier.is_valid_request(
             request.get_data(), request.headers
